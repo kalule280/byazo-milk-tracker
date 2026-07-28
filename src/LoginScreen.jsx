@@ -3,6 +3,8 @@ import axios from 'axios';
 import logo from './images/Byazo logo .jpg';
 import './LoginScreen.css';
 
+const API_BASE_URL = "https://byazo-milk-tracker.onrender.com";
+
 function LoginScreen({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,7 +17,7 @@ function LoginScreen({ onLoginSuccess }) {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', {
+      const response = await axios.post(`${API_BASE_URL}/api/auth/login`, {
         email,
         password
       });

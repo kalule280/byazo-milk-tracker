@@ -5,6 +5,8 @@ import wallpaper from './images/byazo wallpaper.jpg';
 import './App.css';
 import LoginScreen from './LoginScreen';
 
+const API_BASE_URL = "https://byazo-milk-tracker.onrender.com";
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -124,8 +126,8 @@ function Dashboard() {
     const fetchRecord = async () => {
       try {
         const [recordRes, stockRes] = await Promise.all([
-          axios.get(`http://localhost:5000/api/milk-records/${recordDate}/${branch}`),
-          axios.get(`http://localhost:5000/api/previous-stock/${recordDate}/${branch}`)
+          axios.get(`${API_BASE_URL}/api/milk-records/${recordDate}/${branch}`),
+          axios.get(`${API_BASE_URL}/api/previous-stock/${recordDate}/${branch}`)
         ]);
 
         const previousStock = Number(stockRes.data?.old_stock ?? 0);
@@ -172,7 +174,7 @@ function Dashboard() {
 
   // Fetch Dashboard metrics
   const fetchDashboard = (date = recordDate, branchName = branchFilter) => {
-    axios.get(`http://localhost:5000/api/dashboard/${date}`, { params: { branch: branchName } })
+    axios.get(`${API_BASE_URL}/api/dashboard/${date}`, { params: { branch: branchName } })
       .then(res => setDashboardData(res.data))
       .catch(err => console.error("Error fetching dashboard", err));
   };
@@ -226,9 +228,9 @@ function Dashboard() {
     setBranchesLoading(true);
     try {
       const [profilesRes, transfersRes, staffRes] = await Promise.all([
-        axios.get('http://localhost:5000/api/branches'),
-        axios.get('http://localhost:5000/api/stock-transfers'),
-        axios.get('http://localhost:5000/api/branch-staff')
+        axios.get(`${API_BASE_URL}/api/branches`),
+        axios.get(`${API_BASE_URL}/api/stock-transfers`),
+        axios.get(`${API_BASE_URL}/api/branch-staff`)
       ]);
       setBranchProfiles(profilesRes.data);
       setStockTransfers(transfersRes.data);
@@ -246,7 +248,7 @@ function Dashboard() {
 
   const handleSaveProfile = async (branchName) => {
     try {
-      await axios.put(`http://localhost:5000/api/branches/${branchName}`, profileDraft);
+      await axios.put(`${API_BASE_URL}/api/branches/${branchName}`, profileDraft);
       setEditingProfile(null);
       fetchBranchesData();
     } catch (err) {
@@ -266,7 +268,7 @@ function Dashboard() {
       return;
     }
     try {
-      await axios.post('http://localhost:5000/api/stock-transfers', transferForm);
+      await axios.post(`${API_BASE_URL}/api/stock-transfers`, transferForm);
       setTransferMsg('✅ Transfer logged successfully.');
       setTransferForm(prev => ({ ...prev, liters: '', reason: '' }));
       fetchBranchesData();
@@ -284,7 +286,7 @@ function Dashboard() {
       return;
     }
     try {
-      await axios.post('http://localhost:5000/api/branch-staff', staffForm);
+      await axios.post(`${API_BASE_URL}/api/branch-staff`, staffForm);
       setStaffMsg('✅ Staff member assigned.');
       setStaffForm(prev => ({ ...prev, staff_name: '' }));
       fetchBranchesData();
@@ -296,7 +298,7 @@ function Dashboard() {
 
   const handleRemoveStaff = async (staffId) => {
     try {
-      await axios.delete(`http://localhost:5000/api/branch-staff/${staffId}`);
+      await axios.delete(`${API_BASE_URL}/api/branch-staff/${staffId}`);
       fetchBranchesData();
     } catch (err) {
       console.error('Failed to remove staff:', err);
@@ -365,7 +367,7 @@ function Dashboard() {
 
     try {
       setIsSaving(true);
-      await axios.post('http://localhost:5000/api/milk-records', payload);
+      await axios.post(`${API_BASE_URL}/api/milk-records`, payload);
       lastSavedSignature.current = signature;
       if (!isAutoSave) setMessage('Daily record saved successfully!');
       fetchDashboard(recordDate);
@@ -421,11 +423,11 @@ function Dashboard() {
       const startDateStr = startDateObj.toISOString().split('T')[0];
 
       const [summaryRes, trendRes, txRes, branchRes, rangeRes] = await Promise.all([
-        axios.get('http://localhost:5000/api/analytics/summary', { params }),
-        axios.get('http://localhost:5000/api/analytics/trend', { params: { ...params, days: trendDays } }),
-        axios.get('http://localhost:5000/api/analytics/transactions', { params: { ...params, limit: 5 } }),
-        axios.get(`http://localhost:5000/api/dashboard/${date}`),
-        axios.get('http://localhost:5000/api/analytics/range-records', {
+        axios.get(`${API_BASE_URL}/api/analytics/summary`, { params }),
+        axios.get(`${API_BASE_URL}/api/analytics/trend`, { params: { ...params, days: trendDays } }),
+        axios.get(`${API_BASE_URL}/api/analytics/transactions`, { params: { ...params, limit: 5 } }),
+        axios.get(`${API_BASE_URL}/api/dashboard/${date}`),
+        axios.get(`${API_BASE_URL}/api/analytics/range-records`, {
           params: { startDate: startDateStr, endDate: date, branch: 'All' }
         })
       ]);
