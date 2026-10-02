@@ -57,6 +57,59 @@ const emptyForm = {
   expense_other: 0
 };
 
+const PRICE_TIERS = [1500, 1600, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2200];
+const MONTHLY_RENT = { Bakuli: 700000, Owiino: 0, Kawempe: 400000 };
+const EXPENSE_CATEGORIES = [
+  { key: 'expense_fuel', label: 'Fuel' },
+  { key: 'expense_transport', label: 'Transport' },
+  { key: 'expense_electricity', label: 'Electricity' },
+  { key: 'expense_salaries', label: 'Workers’ salaries' },
+  { key: 'expense_packaging', label: 'Packaging' },
+  { key: 'expense_repairs', label: 'Repairs' },
+  { key: 'expense_other', label: 'Other recorded expenses' }
+];
+
+const getPreviousMonthPeriod = (today = new Date()) => {
+  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
+  const toDateString = date => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
+
+  return {
+    startDate: toDateString(start),
+    endDate: toDateString(end),
+    label: start.toLocaleDateString('en-UG', { month: 'long', year: 'numeric' })
+  };
+};
+
+const calculateTierTotals = record => {
+  const number = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+  const litersByTier = PRICE_TIERS.map(price => number(record[`liters_sold_${price}`]));
+  const totalLiters = litersByTier.reduce((sum, liters) => sum + liters, 0);
+  const totalSales = litersByTier.reduce((sum, liters, index) => sum + liters * PRICE_TIERS[index], 0);
+  const totalExpenses = EXPENSE_CATEGORIES.reduce((sum, expense) => sum + number(record[expense.key]), 0);
+  const totalCostOfGoodsSold = number(record.buying_price) * totalLiters;
+
+  return {
+    totalLiters,
+    totalSales,
+    totalExpenses,
+    totalCostOfGoodsSold,
+    grossProfit: totalSales - totalCostOfGoodsSold,
+    closingStock: number(record.old_stock) + number(record.new_stock) - totalLiters,
+    netProfit: totalSales - totalCostOfGoodsSold - totalExpenses
+  };
+};
+
+const formatUGX = value => Number(value || 0).toLocaleString('en-UG', { maximumFractionDigits: 0 });
+const formatLiters = value => Number(value || 0).toLocaleString('en-UG', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+});
+
 function Dashboard() {
   const [currentView, setCurrentView] = useState('dashboard'); // 'daily' | 'dashboard' | 'analytics'
   const [branch, setBranch] = useState('Bakuli');
@@ -102,6 +155,8 @@ function Dashboard() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [rangeRecords, setRangeRecords] = useState([]);
   const [rangeLoading, setRangeLoading] = useState(false);
+  const [previousMonthRecords, setPreviousMonthRecords] = useState([]);
+  const previousMonthPeriod = useMemo(() => getPreviousMonthPeriod(), []);
 
   // --- Branches State ---
   const [branchesSubTab, setBranchesSubTab] = useState('profiles');
@@ -431,19 +486,23 @@ function Dashboard() {
       startDateObj.setDate(startDateObj.getDate() - 30); // 30 days ago
       const startDateStr = startDateObj.toISOString().split('T')[0];
 
-      const [summaryRes, trendRes, txRes, branchRes, rangeRes] = await Promise.all([
+      const [summaryRes, trendRes, txRes, branchRes, rangeRes, previousMonthRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/api/analytics/summary`, { params }),
         axios.get(`${API_BASE_URL}/api/analytics/trend`, { params: { ...params, days: trendDays } }),
         axios.get(`${API_BASE_URL}/api/analytics/transactions`, { params: { ...params, limit: 5 } }),
         axios.get(`${API_BASE_URL}/api/dashboard/${date}`),
         axios.get(`${API_BASE_URL}/api/analytics/range-records`, {
           params: { startDate: startDateStr, endDate: date, branch: 'All' }
+        }),
+        axios.get(`${API_BASE_URL}/api/analytics/range-records`, {
+          params: { ...previousMonthPeriod, branch: 'All' }
         })
       ]);
       setAnalyticsSummary(summaryRes.data);
       setTrendData(trendRes.data || []);
       setRecentTx(txRes.data || []);
       setRangeRecords(rangeRes.data || []);
+      setPreviousMonthRecords(previousMonthRes.data || []);
       
       // Build branch performance with percentages
       const bData = branchRes.data || [];
@@ -466,6 +525,75 @@ function Dashboard() {
     }
   }, [currentView, analyticsDate, analyticsBranch]);
 
+  const previousMonthReport = useMemo(() => {
+    const summarize = (branchName, records, rent) => {
+      const expenseBreakdown = Object.fromEntries(EXPENSE_CATEGORIES.map(({ key, label }) => [
+        label,
+        records.reduce((sum, record) => sum + (Number(record[key]) || 0), 0)
+      ]));
+      const tierVolumes = Object.fromEntries(PRICE_TIERS.map(price => [
+        price,
+        records.reduce((sum, record) => sum + (Number(record[`liters_sold_${price}`]) || 0), 0)
+      ]));
+      const totals = records.reduce((sum, record) => {
+        const values = calculateTierTotals(record);
+        sum.liters += values.totalLiters;
+        sum.revenue += values.totalSales;
+        sum.buyingCost += values.totalCostOfGoodsSold;
+        return sum;
+      }, { liters: 0, revenue: 0, buyingCost: 0 });
+      const recordedExpenses = Object.values(expenseBreakdown).reduce((sum, value) => sum + value, 0);
+      const grossProfit = totals.revenue - totals.buyingCost;
+      const netBeforeRent = grossProfit - recordedExpenses;
+      const netProfit = netBeforeRent - rent;
+      const totalMonthlyCosts = totals.buyingCost + recordedExpenses + rent;
+      const grossMarginPerLiter = totals.liters > 0 ? grossProfit / totals.liters : 0;
+      const breakEvenLiters = grossMarginPerLiter > 0
+        ? Math.ceil((recordedExpenses + rent) / grossMarginPerLiter)
+        : null;
+      const rankedCosts = [
+        { label: 'Milk purchases', amount: totals.buyingCost },
+        ...EXPENSE_CATEGORIES.map(category => ({
+          label: category.label,
+          amount: expenseBreakdown[category.label]
+        })),
+        { label: 'Rent provision', amount: rent }
+      ].filter(cost => cost.amount > 0).sort((left, right) => right.amount - left.amount);
+
+      return {
+        branchName,
+        records: records.length,
+        ...totals,
+        expenseBreakdown,
+        tierVolumes,
+        recordedExpenses,
+        rent,
+        totalMonthlyCosts,
+        rankedCosts,
+        grossProfit,
+        netBeforeRent,
+        netProfit,
+        breakEvenLiters,
+        targetGap: breakEvenLiters === null ? null : Math.max(0, breakEvenLiters - totals.liters),
+        rentShortfall: rent > 0 ? Math.max(0, rent - netBeforeRent) : 0,
+        rentStatus: rent === 0 ? 'No rent set' : netBeforeRent >= rent ? 'Covered' : 'Shortfall'
+      };
+    };
+
+    const branches = ['Bakuli', 'Owiino', 'Kawempe'].map(branchName => summarize(
+      branchName,
+      previousMonthRecords.filter(record => record.branch_name === branchName),
+      MONTHLY_RENT[branchName]
+    ));
+    const company = summarize(
+      'Company Total',
+      previousMonthRecords,
+      Object.values(MONTHLY_RENT).reduce((sum, rent) => sum + rent, 0)
+    );
+
+    return { branches, company, period: previousMonthPeriod };
+  }, [previousMonthRecords, previousMonthPeriod]);
+
   const exportToCSV = (type) => {
     let records = [];
     const todayStr = analyticsDate;
@@ -476,6 +604,8 @@ function Dashboard() {
       const limitDate = new Date(todayStr);
       limitDate.setDate(limitDate.getDate() - 7);
       records = rangeRecords.filter(r => new Date(r.record_date) >= limitDate);
+    } else if (type === 'monthly') {
+      records = previousMonthRecords;
     } else {
       records = rangeRecords;
     }
@@ -495,13 +625,14 @@ function Dashboard() {
     
     const csvRows = [headers.join(",")];
     for (const r of records) {
+      const totals = calculateTierTotals(r);
       const rowValues = [
         r.record_date ? r.record_date.split('T')[0] : "",
         r.branch_name,
         r.buying_price,
         r.old_stock,
         r.new_stock,
-        r.total_stock,
+        (Number(r.old_stock) || 0) + (Number(r.new_stock) || 0),
         r.liters_sold_1500,
         r.liters_sold_1600,
         r.liters_sold_1700,
@@ -512,11 +643,11 @@ function Dashboard() {
         r.liters_sold_1950,
         r.liters_sold_2000,
         r.liters_sold_2200,
-        r.total_liters_sold,
-        r.closing_stock,
-        r.total_sales,
-        r.total_cost_of_goods_sold,
-        r.gross_profit,
+        totals.totalLiters,
+        totals.closingStock,
+        totals.totalSales,
+        totals.totalCostOfGoodsSold,
+        totals.grossProfit,
         r.expense_fuel,
         r.expense_transport,
         r.expense_electricity,
@@ -524,8 +655,8 @@ function Dashboard() {
         r.expense_packaging,
         r.expense_repairs,
         r.expense_other,
-        r.total_expenses,
-        r.net_profit
+        totals.totalExpenses,
+        totals.netProfit
       ];
       csvRows.push(rowValues.map(val => `"${val !== undefined && val !== null ? val : ''}"`).join(","));
     }
@@ -535,65 +666,82 @@ function Dashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `byazo_milk_tracker_${type}_summary_${analyticsDate}.csv`);
+    const filePeriod = type === 'monthly' ? previousMonthPeriod.startDate.slice(0, 7) : analyticsDate;
+    link.setAttribute("download", `byazo_milk_tracker_${type}_summary_${filePeriod}.csv`);
     document.body.appendChild(link);
     link.click();
     URL.revokeObjectURL(url);
   };
 
   const exportMasterReport = () => {
-    if (branchPerfData.length === 0) {
-      alert("No master report data to export for this date.");
-      return;
-    }
-
-    const headers = [
-      "Branch", "Total Liters Sold", "Total Buying Price (Capital)", "Total Gross Revenue", "Total Expenses", "Net Profit"
+    const { branches, company, period } = previousMonthReport;
+    const csvCell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const money = value => Number(value || 0).toFixed(2);
+    const branchHeaders = [
+      'Branch', 'Liters sold', ...PRICE_TIERS.map(price => `${price} UGX liters`),
+      'Gross revenue UGX', 'Milk purchase cost UGX', 'Gross profit UGX',
+      ...EXPENSE_CATEGORIES.map(category => `${category.label} UGX`),
+      'Recorded expenses UGX', 'Rent UGX', 'Net profit after rent UGX',
+      'Break-even target liters', 'Additional liters to target', 'Rent cover status', 'Rent shortfall UGX'
+    ];
+    const makeBranchRow = branch => [
+      branch.branchName,
+      branch.liters.toFixed(1),
+      ...PRICE_TIERS.map(price => branch.tierVolumes[price].toFixed(1)),
+      money(branch.revenue), money(branch.buyingCost), money(branch.grossProfit),
+      ...EXPENSE_CATEGORIES.map(category => money(branch.expenseBreakdown[category.label])),
+      money(branch.recordedExpenses), money(branch.rent), money(branch.netProfit),
+      branch.breakEvenLiters ?? 'Unavailable', branch.targetGap ?? 'Unavailable',
+      branch.rentStatus, money(branch.rentShortfall)
+    ];
+    const csvRows = [
+      ['BYAZO MILK AND SUPPLIERS - MONTHLY MANAGEMENT REPORT'],
+      ['Reporting period', period.label, `${period.startDate} to ${period.endDate}`],
+      [],
+      ['COMPANY SUMMARY'],
+      ['Measure', 'Value', 'Unit'],
+      ['Total liters sold', company.liters.toFixed(1), 'L'],
+      ['Gross revenue (money received)', money(company.revenue), 'UGX'],
+      ['Milk purchase cost', money(company.buyingCost), 'UGX'],
+      ['Gross profit before expenses', money(company.grossProfit), 'UGX'],
+      ['Recorded expenses including salaries', money(company.recordedExpenses), 'UGX'],
+      ['Fixed rent provision', money(company.rent), 'UGX'],
+      ['Net profit after all listed costs', money(company.netProfit), 'UGX'],
+      ['Break-even sales target', company.breakEvenLiters ?? 'Unavailable', 'L'],
+      ['Additional liters to target', company.targetGap ?? 'Unavailable', 'L'],
+      [],
+      ['BRANCH PERFORMANCE'],
+      branchHeaders,
+      ...branches.map(makeBranchRow),
+      makeBranchRow(company),
+      [],
+      ['COST PRIORITIES BY BRANCH - LARGEST TO SMALLEST'],
+      ['Branch', 'Rank', 'Cost category', 'Amount (UGX)', 'Share of branch costs (%)'],
+      ...branches.flatMap(branch => branch.rankedCosts.map((cost, index) => [
+        branch.branchName,
+        index + 1,
+        cost.label,
+        money(cost.amount),
+        branch.totalMonthlyCosts > 0 ? (cost.amount / branch.totalMonthlyCosts * 100).toFixed(1) : '0.0'
+      ]))
     ];
 
-    const csvRows = [headers.join(",")];
-    let totalLiters = 0;
-    let totalBuying = 0;
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-    let totalNetProfit = 0;
-
-    for (const b of branchPerfData) {
-      totalLiters += Number(b.total_liters || 0);
-      totalBuying += Number(b.total_buying_cost || 0);
-      totalRevenue += Number(b.total_revenue || 0);
-      totalExpenses += Number(b.total_expenses || 0);
-      totalNetProfit += Number(b.total_net_profit || 0);
-
-      csvRows.push([
-        `"${b.branch_name}"`,
-        `"${Number(b.total_liters || 0).toFixed(1)}"`,
-        `"${Number(b.total_buying_cost || 0).toFixed(2)}"`,
-        `"${Number(b.total_revenue || 0).toFixed(2)}"`,
-        `"${Number(b.total_expenses || 0).toFixed(2)}"`,
-        `"${Number(b.total_net_profit || 0).toFixed(2)}"`
-      ].join(","));
-    }
-
-    // Add summary row
-    csvRows.push([
-      '"COMPANY TOTAL"',
-      `"${totalLiters.toFixed(1)}"`,
-      `"${totalBuying.toFixed(2)}"`,
-      `"${totalRevenue.toFixed(2)}"`,
-      `"${totalExpenses.toFixed(2)}"`,
-      `"${totalNetProfit.toFixed(2)}"`
-    ].join(","));
-
-    const csvString = csvRows.join("\n");
+    const csvString = csvRows.map(row => row.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `Master_Report_${analyticsDate}.csv`);
+    link.setAttribute("download", `Byazo_Master_Report_${period.startDate.slice(0, 7)}.csv`);
     document.body.appendChild(link);
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const printMonthlyReport = () => {
+    const cleanup = () => document.body.classList.remove('print-monthly-report');
+    document.body.classList.add('print-monthly-report');
+    window.addEventListener('afterprint', cleanup, { once: true });
+    window.print();
   };
 
   const weeklyDates = useMemo(() => {
@@ -1350,45 +1498,129 @@ function Dashboard() {
               <span className="export-label">📥 Export Summaries:</span>
               <button type="button" onClick={() => exportToCSV('daily')} className="btn-secondary btn-sm">CSV Daily</button>
               <button type="button" onClick={() => exportToCSV('weekly')} className="btn-secondary btn-sm">CSV Weekly (7d)</button>
-              <button type="button" onClick={() => exportToCSV('monthly')} className="btn-secondary btn-sm">CSV Monthly (30d)</button>
-              <button type="button" onClick={() => window.print()} className="btn-secondary btn-sm print-btn">🖨️ PDF Report</button>
-              <button type="button" onClick={exportMasterReport} className="btn-export">📊 Export Master Report</button>
+              <button type="button" onClick={() => exportToCSV('monthly')} className="btn-secondary btn-sm">CSV Previous Month</button>
+              <button type="button" onClick={printMonthlyReport} className="btn-secondary btn-sm print-btn">PDF Previous-Month Report</button>
+              <button type="button" onClick={exportMasterReport} className="btn-export">Export Previous-Month Master Report</button>
             </div>
           </div>
 
-          {/* Range Performance Summary KPIs */}
-          <div className="metrics-grid dashboard-kpis">
-            <div className="metric-card kpi-blue">
-              <div className="metric-label">30-Day Total Volume</div>
-              <div className="metric-value">
-                {rangeRecords.filter(r => analyticsBranch === 'All' ? true : r.branch_name === analyticsBranch)
-                  .reduce((sum, r) => sum + Number(r.total_liters_sold || 0), 0)
-                  .toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+          <section className="card monthly-management-report" aria-labelledby="monthly-report-title">
+            <div className="monthly-report-heading">
+              <div>
+                <div className="monthly-report-eyebrow">Management report · previous calendar month</div>
+                <h2 id="monthly-report-title">{previousMonthPeriod.label}</h2>
+                <p>{previousMonthPeriod.startDate} to {previousMonthPeriod.endDate}</p>
               </div>
-              <div className="metric-unit">Liters Sold</div>
+              {analyticsLoading && <span className="monthly-report-loading">Updating report</span>}
             </div>
-            <div className="metric-card kpi-green">
-              <div className="metric-label">30-Day Gross Revenue</div>
-              <div className="metric-value">
-                {profitabilityChartData.summary.grossRevenue.toLocaleString()}
+
+            <div className="monthly-report-print-header">
+              <h1>BYAZO MILK AND SUPPLIERS</h1>
+              <h2>Monthly Management Report</h2>
+              <p>{previousMonthPeriod.label} · {previousMonthPeriod.startDate} to {previousMonthPeriod.endDate}</p>
+            </div>
+
+            <div className="monthly-report-kpis">
+              <div className="monthly-report-kpi">
+                <span>Total milk sold</span>
+                <strong>{formatLiters(previousMonthReport.company.liters)} L</strong>
               </div>
-              <div className="metric-unit">UGX</div>
-            </div>
-            <div className="metric-card kpi-orange">
-              <div className="metric-label">30-Day Total Expenses</div>
-              <div className="metric-value">
-                {profitabilityChartData.summary.totalExpenses.toLocaleString()}
+              <div className="monthly-report-kpi">
+                <span>Money received</span>
+                <strong>{formatUGX(previousMonthReport.company.revenue)} UGX</strong>
               </div>
-              <div className="metric-unit">UGX (Operating Costs)</div>
-            </div>
-            <div className={`metric-card ${profitabilityChartData.summary.netProfit >= 0 ? 'kpi-emerald' : 'kpi-red'}`}>
-              <div className="metric-label">30-Day Net Profit</div>
-              <div className="metric-value">
-                {profitabilityChartData.summary.netProfit.toLocaleString()}
+              <div className="monthly-report-kpi">
+                <span>Total costs including rent</span>
+                <strong>{formatUGX(previousMonthReport.company.buyingCost + previousMonthReport.company.recordedExpenses + previousMonthReport.company.rent)} UGX</strong>
               </div>
-              <div className="metric-unit">UGX</div>
+              <div className={`monthly-report-kpi ${previousMonthReport.company.netProfit >= 0 ? 'is-positive' : 'is-negative'}`}>
+                <span>Net profit after all listed costs</span>
+                <strong>{formatUGX(previousMonthReport.company.netProfit)} UGX</strong>
+              </div>
             </div>
-          </div>
+
+            <div className="monthly-report-table-wrap">
+              <table className="monthly-report-table">
+                <thead>
+                  <tr>
+                    <th>Branch</th>
+                    <th>Liters sold</th>
+                    <th>Revenue</th>
+                    <th>Milk cost</th>
+                    <th>Gross profit</th>
+                    <th>Recorded expenses</th>
+                    <th>Workers’ salaries</th>
+                    <th>Rent</th>
+                    <th>Net after costs</th>
+                    <th>Actual / target liters</th>
+                    <th>More liters to target</th>
+                    <th>Rent cover</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...previousMonthReport.branches, previousMonthReport.company].map(branchReport => (
+                    <tr key={branchReport.branchName} className={branchReport.branchName === 'Company Total' ? 'monthly-report-total' : ''}>
+                      <th scope="row">{branchReport.branchName}</th>
+                      <td>{formatLiters(branchReport.liters)} L</td>
+                      <td>{formatUGX(branchReport.revenue)} UGX</td>
+                      <td>{formatUGX(branchReport.buyingCost)} UGX</td>
+                      <td>{formatUGX(branchReport.grossProfit)} UGX</td>
+                      <td>{formatUGX(branchReport.recordedExpenses)} UGX</td>
+                      <td>{formatUGX(branchReport.expenseBreakdown['Workers’ salaries'])} UGX</td>
+                      <td>{formatUGX(branchReport.rent)} UGX</td>
+                      <td className={branchReport.netProfit >= 0 ? 'report-profit' : 'report-loss'}>{formatUGX(branchReport.netProfit)} UGX</td>
+                      <td>{branchReport.breakEvenLiters === null
+                        ? `${formatLiters(branchReport.liters)} / Not available`
+                        : `${formatLiters(branchReport.liters)} / ${formatLiters(branchReport.breakEvenLiters)} L`}</td>
+                      <td>{branchReport.targetGap === null ? 'Not available' : branchReport.targetGap === 0 ? 'Target met' : `${formatLiters(branchReport.targetGap)} L`}</td>
+                      <td>
+                        <span className={`monthly-rent-status ${branchReport.rent === 0 ? 'is-neutral' : branchReport.rentStatus === 'Covered' ? 'is-covered' : 'is-shortfall'}`}>
+                          {branchReport.rent === 0 ? 'Not set' : branchReport.rentStatus === 'Covered'
+                            ? 'Covered'
+                            : `Short ${formatUGX(branchReport.rentShortfall)} UGX`}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="monthly-expense-priorities">
+              <div className="monthly-report-subheading">
+                <div>
+                  <h3>Cost priorities by branch</h3>
+                  <p>Largest costs first, to show where management review may have the greatest impact.</p>
+                </div>
+              </div>
+              <div className="monthly-expense-grid">
+                {previousMonthReport.branches.map(branchReport => (
+                  <section className="monthly-expense-branch" key={branchReport.branchName}>
+                    <div className="monthly-expense-branch-heading">
+                      <h4>{branchReport.branchName}</h4>
+                      <span>{formatUGX(branchReport.totalMonthlyCosts)} UGX total costs</span>
+                    </div>
+                    {branchReport.rankedCosts.length > 0 ? branchReport.rankedCosts.map((cost, index) => (
+                      <div className="monthly-expense-row" key={cost.label}>
+                        <span className="monthly-expense-rank">{index + 1}</span>
+                        <span className="monthly-expense-name">{cost.label}</span>
+                        <span className="monthly-expense-amount">{formatUGX(cost.amount)} UGX</span>
+                        <span className="monthly-expense-share">{branchReport.totalMonthlyCosts > 0
+                          ? `${(cost.amount / branchReport.totalMonthlyCosts * 100).toFixed(1)}%`
+                          : '0%'}</span>
+                      </div>
+                    )) : <p className="monthly-expense-empty">No costs recorded for this month.</p>}
+                  </section>
+                ))}
+              </div>
+            </div>
+
+            <div className="monthly-report-notes">
+              <p><strong>Rent provision:</strong> Bakuli 700,000 UGX; Kawempe 400,000 UGX. Rent is added separately from recorded expenses.</p>
+              <p><strong>Break-even target:</strong> actual liters are shown beside the minimum monthly liters required to cover milk purchases, recorded expenses, and rent at the month’s actual average gross margin. “Not available” means no positive gross margin was recorded.</p>
+              <p><strong>Rent decision:</strong> “Covered” means gross profit after recorded expenses can meet the full rent provision. A shortfall shows how much is not covered. Do not also enter these fixed rents under “Other recorded expenses.”</p>
+            </div>
+          </section>
 
           {/* Print Only Header */}
           <div className="print-only-header">
@@ -1546,10 +1778,10 @@ function Dashboard() {
               </div>
             </div>
 
-            {/* 4. Consolidated P&L Master Table */}
+            {/* 4. Selected-date branch detail; management exports use previous month */}
             <div className="card">
-              <h3>🏢 Consolidated P&L (Company Financials)</h3>
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Side-by-side totals for all branches for the selected date: <strong>{analyticsDate}</strong></p>
+              <h3>Selected-Date Branch Detail</h3>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>This snapshot follows the chart date. The management report and exports above cover only {previousMonthPeriod.label}.</p>
               <div style={{ overflowX: 'auto' }}>
                 <table className="master-pl-table">
                   <thead>
