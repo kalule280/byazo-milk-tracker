@@ -41,8 +41,11 @@ const emptyForm = {
   liters_sold_1500: 0,
   liters_sold_1600: 0,
   liters_sold_1700: 0,
+  liters_sold_1750: 0,
   liters_sold_1800: 0,
+  liters_sold_1850: 0,
   liters_sold_1900: 0,
+  liters_sold_1950: 0,
   liters_sold_2000: 0,
   liters_sold_2200: 0,
   expense_fuel: 0,
@@ -144,8 +147,11 @@ function Dashboard() {
             liters_sold_1500: recordRes.data.liters_sold_1500 ?? 0,
             liters_sold_1600: recordRes.data.liters_sold_1600 ?? 0,
             liters_sold_1700: recordRes.data.liters_sold_1700 ?? 0,
+            liters_sold_1750: recordRes.data.liters_sold_1750 ?? 0,
             liters_sold_1800: recordRes.data.liters_sold_1800 ?? 0,
+            liters_sold_1850: recordRes.data.liters_sold_1850 ?? 0,
             liters_sold_1900: recordRes.data.liters_sold_1900 ?? 0,
+            liters_sold_1950: recordRes.data.liters_sold_1950 ?? 0,
             liters_sold_2000: recordRes.data.liters_sold_2000 ?? 0,
             liters_sold_2200: recordRes.data.liters_sold_2200 ?? 0,
             expense_fuel: recordRes.data.expense_fuel ?? 0,
@@ -311,7 +317,7 @@ function Dashboard() {
       return Number.isFinite(number) ? number : 0;
     };
 
-    const tierPrices = [1500, 1600, 1700, 1800, 1900, 2000, 2200];
+    const tierPrices = [1500, 1600, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2200];
     const litersByTier = tierPrices.map(price => parseNumber(formData[`liters_sold_${price}`]));
     const totalLitersSold = litersByTier.reduce((sum, liters) => sum + liters, 0);
     const expectedRevenue = litersByTier.reduce((sum, liters, index) => sum + (liters * tierPrices[index]), 0);
@@ -342,8 +348,11 @@ function Dashboard() {
       (Number(dataToSave.liters_sold_1500) || 0) +
       (Number(dataToSave.liters_sold_1600) || 0) +
       (Number(dataToSave.liters_sold_1700) || 0) +
+      (Number(dataToSave.liters_sold_1750) || 0) +
       (Number(dataToSave.liters_sold_1800) || 0) +
+      (Number(dataToSave.liters_sold_1850) || 0) +
       (Number(dataToSave.liters_sold_1900) || 0) +
+      (Number(dataToSave.liters_sold_1950) || 0) +
       (Number(dataToSave.liters_sold_2000) || 0) +
       (Number(dataToSave.liters_sold_2200) || 0);
 
@@ -478,7 +487,7 @@ function Dashboard() {
     
     const headers = [
       "Record Date", "Branch Name", "Buying Price", "Opening Stock", "New Stock Added", "Total Stock Available",
-      "Liters Sold 1500", "Liters Sold 1600", "Liters Sold 1700", "Liters Sold 1800", "Liters Sold 1900", "Liters Sold 2000", "Liters Sold 2200",
+      "Liters Sold 1500", "Liters Sold 1600", "Liters Sold 1700", "Liters Sold 1750", "Liters Sold 1800", "Liters Sold 1850", "Liters Sold 1900", "Liters Sold 1950", "Liters Sold 2000", "Liters Sold 2200",
       "Total Liters Sold", "Closing Stock", "Gross Revenue (Sales)", "Cost of Goods Sold", "Gross Profit",
       "Expense Fuel", "Expense Transport", "Expense Electricity", "Expense Salaries", "Expense Packaging", "Expense Repairs", "Expense Other",
       "Total Expenses", "Net Profit"
@@ -496,8 +505,11 @@ function Dashboard() {
         r.liters_sold_1500,
         r.liters_sold_1600,
         r.liters_sold_1700,
+        r.liters_sold_1750,
         r.liters_sold_1800,
+        r.liters_sold_1850,
         r.liters_sold_1900,
+        r.liters_sold_1950,
         r.liters_sold_2000,
         r.liters_sold_2200,
         r.total_liters_sold,
@@ -739,7 +751,7 @@ function Dashboard() {
       ? rangeRecords
       : rangeRecords.filter(r => r.branch_name === analyticsBranch);
 
-    const tiers = ['1500', '1600', '1700', '1800', '1900', '2000', '2200'];
+    const tiers = ['1500', '1600', '1700', '1750', '1800', '1850', '1900', '1950', '2000', '2200'];
     const volumes = tiers.map(tier => {
       return filtered.reduce((sum, r) => sum + Number(r[`liters_sold_${tier}`] || 0), 0);
     });
@@ -1004,8 +1016,11 @@ function Dashboard() {
                   <option value="1500">1500 UGX</option>
                   <option value="1600">1600 UGX</option>
                   <option value="1700">1700 UGX</option>
+                  <option value="1750">1750 UGX</option>
                   <option value="1800">1800 UGX</option>
+                  <option value="1850">1850 UGX</option>
                   <option value="1900">1900 UGX</option>
+                  <option value="1950">1950 UGX</option>
                   <option value="2000">2000 UGX</option>
                   <option value="2200">2200 UGX</option>
                 </select>
@@ -1028,9 +1043,9 @@ function Dashboard() {
 
             {/* Active Tiers Display */}
             <div className="active-tiers-container">
-              {['1500', '1600', '1700', '1800', '1900', '2000', '2200'].some(t => Number(formData[`liters_sold_${t}`]) > 0) ? (
+              {['1500', '1600', '1700', '1750', '1800', '1850', '1900', '1950', '2000', '2200'].some(t => Number(formData[`liters_sold_${t}`]) > 0) ? (
                 <div className="active-tiers-grid">
-                  {['1500', '1600', '1700', '1800', '1900', '2000', '2200'].map(tier => {
+                  {['1500', '1600', '1700', '1750', '1800', '1850', '1900', '1950', '2000', '2200'].map(tier => {
                     const liters = Number(formData[`liters_sold_${tier}`]) || 0;
                     if (liters <= 0) return null;
                     return (

@@ -19,6 +19,23 @@ app.use((req, res, next) => {
 
 app.use('/api/auth', authRoutes);
 
+const ensureMilkRecordColumns = async () => {
+    try {
+        const [existingColumns] = await pool.query('SHOW COLUMNS FROM daily_milk_records');
+        const columns = existingColumns.map(col => col.Field);
+        const requiredColumns = ['liters_sold_1750', 'liters_sold_1850', 'liters_sold_1950'];
+
+        for (const column of requiredColumns) {
+            if (!columns.includes(column)) {
+                await pool.query(`ALTER TABLE daily_milk_records ADD COLUMN ${column} DECIMAL(10,2) DEFAULT 0`);
+                console.log(`Added missing column: ${column}`);
+            }
+        }
+    } catch (err) {
+        console.error('Error ensuring milk record columns:', err.message);
+    }
+};
+
 // --- Initialize Branch Tables on Startup ---
 const initBranchTables = async () => {
     try {
@@ -74,6 +91,7 @@ const initBranchTables = async () => {
             );
         }
         console.log('Branch tables initialized.');
+        await ensureMilkRecordColumns();
     } catch (err) {
         console.error('Error initializing branch tables:', err.message);
     }
@@ -107,8 +125,11 @@ app.post('/api/milk-records', async (req, res) => {
             liters_sold_1500,
             liters_sold_1600,
             liters_sold_1700,
+            liters_sold_1750,
             liters_sold_1800,
+            liters_sold_1850,
             liters_sold_1900,
+            liters_sold_1950,
             liters_sold_2000,
             liters_sold_2200,
             expense_fuel,
@@ -123,11 +144,11 @@ app.post('/api/milk-records', async (req, res) => {
         const query = `
             INSERT INTO daily_milk_records (
                 record_date, branch_name, buying_price, old_stock, new_stock,
-                liters_sold_1500, liters_sold_1600, liters_sold_1700, liters_sold_1800, 
-                liters_sold_1900, liters_sold_2000, liters_sold_2200,
+                liters_sold_1500, liters_sold_1600, liters_sold_1700, liters_sold_1750, liters_sold_1800, liters_sold_1850,
+                liters_sold_1900, liters_sold_1950, liters_sold_2000, liters_sold_2200,
                 expense_fuel, expense_transport, expense_electricity, 
                 expense_salaries, expense_packaging, expense_repairs, expense_other
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 buying_price = VALUES(buying_price),
                 old_stock = VALUES(old_stock),
@@ -135,8 +156,11 @@ app.post('/api/milk-records', async (req, res) => {
                 liters_sold_1500 = VALUES(liters_sold_1500),
                 liters_sold_1600 = VALUES(liters_sold_1600),
                 liters_sold_1700 = VALUES(liters_sold_1700),
+                liters_sold_1750 = VALUES(liters_sold_1750),
                 liters_sold_1800 = VALUES(liters_sold_1800),
+                liters_sold_1850 = VALUES(liters_sold_1850),
                 liters_sold_1900 = VALUES(liters_sold_1900),
+                liters_sold_1950 = VALUES(liters_sold_1950),
                 liters_sold_2000 = VALUES(liters_sold_2000),
                 liters_sold_2200 = VALUES(liters_sold_2200),
                 expense_fuel = VALUES(expense_fuel),
@@ -174,20 +198,23 @@ app.post('/api/milk-records', async (req, res) => {
         const liters1500 = parseNum(liters_sold_1500);
         const liters1600 = parseNum(liters_sold_1600);
         const liters1700 = parseNum(liters_sold_1700);
+        const liters1750 = parseNum(liters_sold_1750);
         const liters1800 = parseNum(liters_sold_1800);
+        const liters1850 = parseNum(liters_sold_1850);
         const liters1900 = parseNum(liters_sold_1900);
+        const liters1950 = parseNum(liters_sold_1950);
         const liters2000 = parseNum(liters_sold_2000);
         const liters2200 = parseNum(liters_sold_2200);
 
-        const totalLitersSold = liters1500 + liters1600 + liters1700 + liters1800 + liters1900 + liters2000 + liters2200;
+        const totalLitersSold = liters1500 + liters1600 + liters1700 + liters1750 + liters1800 + liters1850 + liters1900 + liters1950 + liters2000 + liters2200;
 
         // Calculate the remaining current/closing stock
         const currentStock = totalAvailableStock - totalLitersSold;
 
         const values = [
             record_date, branch_name, parseNum(buying_price), oldStockNum, newStockAddedNum,
-            liters1500, liters1600, liters1700, liters1800,
-            liters1900, liters2000, liters2200,
+            liters1500, liters1600, liters1700, liters1750, liters1800, liters1850,
+            liters1900, liters1950, liters2000, liters2200,
             parseNum(expense_fuel), parseNum(expense_transport), parseNum(expense_electricity),
             parseNum(expense_salaries), parseNum(expense_packaging), parseNum(expense_repairs), parseNum(expense_other)
         ];
