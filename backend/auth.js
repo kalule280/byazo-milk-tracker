@@ -9,7 +9,7 @@ const JWT_SECRET = 'byazo_secret_key_2026';
 // 1. REGISTER ROUTE (To create your boss/admin or staff accounts)
 router.post('/register', async (req, res) => {
     const { email, password, role, branch_id } = req.body;
-    
+
     try {
         // Check if user already exists
         const [existing] = await req.db.query('SELECT * FROM users WHERE email = ?', [email]);
