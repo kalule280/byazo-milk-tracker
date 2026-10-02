@@ -128,6 +128,59 @@ const initBranchTables = async () => {
         }
         console.log('Branch tables initialized.');
         await ensureMilkRecordColumns();
+        const [recalculation] = await pool.query(`
+            UPDATE daily_milk_records
+            SET total_liters_sold =
+                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
+                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
+                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
+                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
+                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0),
+                total_sales =
+                    COALESCE(liters_sold_1500, 0) * 1500 + COALESCE(liters_sold_1600, 0) * 1600 +
+                    COALESCE(liters_sold_1700, 0) * 1700 + COALESCE(liters_sold_1750, 0) * 1750 +
+                    COALESCE(liters_sold_1800, 0) * 1800 + COALESCE(liters_sold_1850, 0) * 1850 +
+                    COALESCE(liters_sold_1900, 0) * 1900 + COALESCE(liters_sold_1950, 0) * 1950 +
+                    COALESCE(liters_sold_2000, 0) * 2000 + COALESCE(liters_sold_2200, 0) * 2200,
+                total_expenses =
+                    COALESCE(expense_fuel, 0) + COALESCE(expense_transport, 0) +
+                    COALESCE(expense_electricity, 0) + COALESCE(expense_salaries, 0) +
+                    COALESCE(expense_packaging, 0) + COALESCE(expense_repairs, 0) +
+                    COALESCE(expense_other, 0),
+                total_cost_of_goods_sold = COALESCE(buying_price, 0) * (
+                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
+                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
+                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
+                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
+                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
+                ),
+                closing_stock = COALESCE(old_stock, 0) + COALESCE(new_stock, 0) - (
+                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
+                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
+                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
+                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
+                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
+                ),
+                net_profit =
+                    COALESCE(liters_sold_1500, 0) * 1500 + COALESCE(liters_sold_1600, 0) * 1600 +
+                    COALESCE(liters_sold_1700, 0) * 1700 + COALESCE(liters_sold_1750, 0) * 1750 +
+                    COALESCE(liters_sold_1800, 0) * 1800 + COALESCE(liters_sold_1850, 0) * 1850 +
+                    COALESCE(liters_sold_1900, 0) * 1900 + COALESCE(liters_sold_1950, 0) * 1950 +
+                    COALESCE(liters_sold_2000, 0) * 2000 + COALESCE(liters_sold_2200, 0) * 2200 -
+                    COALESCE(buying_price, 0) * (
+                        COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
+                        COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
+                        COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
+                        COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
+                        COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
+                    ) - (
+                        COALESCE(expense_fuel, 0) + COALESCE(expense_transport, 0) +
+                        COALESCE(expense_electricity, 0) + COALESCE(expense_salaries, 0) +
+                        COALESCE(expense_packaging, 0) + COALESCE(expense_repairs, 0) +
+                        COALESCE(expense_other, 0)
+                    )
+        `);
+        console.log(`Recalculated totals for ${recalculation.affectedRows} milk records.`);
     } catch (err) {
         console.error('Error initializing branch tables:', err.message);
     }
