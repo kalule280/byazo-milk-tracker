@@ -19,6 +19,53 @@ app.use((req, res, next) => {
 
 app.use('/api/auth', authRoutes);
 
+const tierPrices = [1500, 1600, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2200];
+const expenseFields = [
+    'expense_fuel', 'expense_transport', 'expense_electricity', 'expense_salaries',
+    'expense_packaging', 'expense_repairs', 'expense_other'
+];
+
+const calculateRecordTotals = (record) => {
+    const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const litersSold = tierPrices.map(price => number(record[`liters_sold_${price}`]));
+    const totalLiters = litersSold.reduce((total, liters) => total + liters, 0);
+    const totalSales = litersSold.reduce((total, liters, index) => total + liters * tierPrices[index], 0);
+    const totalExpenses = expenseFields.reduce((total, field) => total + number(record[field]), 0);
+    const totalCostOfGoodsSold = number(record.buying_price) * totalLiters;
+    const closingStock = number(record.old_stock) + number(record.new_stock) - totalLiters;
+
+    return {
+        total_liters_sold: totalLiters,
+        total_sales: totalSales,
+        total_expenses: totalExpenses,
+        total_cost_of_goods_sold: totalCostOfGoodsSold,
+        closing_stock: closingStock,
+        net_profit: totalSales - totalCostOfGoodsSold - totalExpenses
+    };
+};
+
+const getDashboardRows = async (date) => {
+    const [records] = await pool.query(
+        'SELECT * FROM daily_milk_records WHERE record_date = ?',
+        [date]
+    );
+    const recordsByBranch = new Map(records.map(record => [record.branch_name, record]));
+
+    return ['Bakuli', 'Owiino', 'Kawempe'].map(branchName => {
+        const record = recordsByBranch.get(branchName);
+        const totals = record ? calculateRecordTotals(record) : {};
+        return {
+            branch_name: branchName,
+            total_liters: totals.total_liters_sold || 0,
+            total_revenue: totals.total_sales || 0,
+            total_expenses: totals.total_expenses || 0,
+            total_net_profit: totals.net_profit || 0,
+            current_stock: totals.closing_stock || 0,
+            total_buying_cost: totals.total_cost_of_goods_sold || 0
+        };
+    });
+};
+
 const ensureMilkRecordColumns = async () => {
     try {
         const [existingColumns] = await pool.query('SHOW COLUMNS FROM daily_milk_records');
@@ -128,59 +175,6 @@ const initBranchTables = async () => {
         }
         console.log('Branch tables initialized.');
         await ensureMilkRecordColumns();
-        const [recalculation] = await pool.query(`
-            UPDATE daily_milk_records
-            SET total_liters_sold =
-                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
-                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
-                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
-                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
-                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0),
-                total_sales =
-                    COALESCE(liters_sold_1500, 0) * 1500 + COALESCE(liters_sold_1600, 0) * 1600 +
-                    COALESCE(liters_sold_1700, 0) * 1700 + COALESCE(liters_sold_1750, 0) * 1750 +
-                    COALESCE(liters_sold_1800, 0) * 1800 + COALESCE(liters_sold_1850, 0) * 1850 +
-                    COALESCE(liters_sold_1900, 0) * 1900 + COALESCE(liters_sold_1950, 0) * 1950 +
-                    COALESCE(liters_sold_2000, 0) * 2000 + COALESCE(liters_sold_2200, 0) * 2200,
-                total_expenses =
-                    COALESCE(expense_fuel, 0) + COALESCE(expense_transport, 0) +
-                    COALESCE(expense_electricity, 0) + COALESCE(expense_salaries, 0) +
-                    COALESCE(expense_packaging, 0) + COALESCE(expense_repairs, 0) +
-                    COALESCE(expense_other, 0),
-                total_cost_of_goods_sold = COALESCE(buying_price, 0) * (
-                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
-                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
-                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
-                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
-                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
-                ),
-                closing_stock = COALESCE(old_stock, 0) + COALESCE(new_stock, 0) - (
-                    COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
-                    COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
-                    COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
-                    COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
-                    COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
-                ),
-                net_profit =
-                    COALESCE(liters_sold_1500, 0) * 1500 + COALESCE(liters_sold_1600, 0) * 1600 +
-                    COALESCE(liters_sold_1700, 0) * 1700 + COALESCE(liters_sold_1750, 0) * 1750 +
-                    COALESCE(liters_sold_1800, 0) * 1800 + COALESCE(liters_sold_1850, 0) * 1850 +
-                    COALESCE(liters_sold_1900, 0) * 1900 + COALESCE(liters_sold_1950, 0) * 1950 +
-                    COALESCE(liters_sold_2000, 0) * 2000 + COALESCE(liters_sold_2200, 0) * 2200 -
-                    COALESCE(buying_price, 0) * (
-                        COALESCE(liters_sold_1500, 0) + COALESCE(liters_sold_1600, 0) +
-                        COALESCE(liters_sold_1700, 0) + COALESCE(liters_sold_1750, 0) +
-                        COALESCE(liters_sold_1800, 0) + COALESCE(liters_sold_1850, 0) +
-                        COALESCE(liters_sold_1900, 0) + COALESCE(liters_sold_1950, 0) +
-                        COALESCE(liters_sold_2000, 0) + COALESCE(liters_sold_2200, 0)
-                    ) - (
-                        COALESCE(expense_fuel, 0) + COALESCE(expense_transport, 0) +
-                        COALESCE(expense_electricity, 0) + COALESCE(expense_salaries, 0) +
-                        COALESCE(expense_packaging, 0) + COALESCE(expense_repairs, 0) +
-                        COALESCE(expense_other, 0)
-                    )
-        `);
-        console.log(`Recalculated totals for ${recalculation.affectedRows} milk records.`);
     } catch (err) {
         console.error('Error initializing branch tables:', err.message);
     }
@@ -192,10 +186,10 @@ app.get('/api/previous-stock/:date/:branch', async (req, res) => {
     try {
         const { date, branch } = req.params;
         const [rows] = await pool.query(
-            `SELECT COALESCE(closing_stock, 0) AS closing_stock FROM daily_milk_records WHERE branch_name = ? AND record_date < ? ORDER BY record_date DESC LIMIT 1`,
+            `SELECT * FROM daily_milk_records WHERE branch_name = ? AND record_date < ? ORDER BY record_date DESC LIMIT 1`,
             [branch, date]
         );
-        const previousStock = rows.length > 0 ? Number(rows[0].closing_stock || 0) : 0.00;
+        const previousStock = rows.length > 0 ? calculateRecordTotals(rows[0]).closing_stock : 0.00;
         res.json({ old_stock: previousStock });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -236,9 +230,8 @@ app.post('/api/milk-records', async (req, res) => {
                 liters_sold_1500, liters_sold_1600, liters_sold_1700, liters_sold_1750, liters_sold_1800, liters_sold_1850,
                 liters_sold_1900, liters_sold_1950, liters_sold_2000, liters_sold_2200,
                 expense_fuel, expense_transport, expense_electricity, 
-                expense_salaries, expense_packaging, expense_repairs, expense_other,
-                total_liters_sold, total_sales, total_expenses, total_cost_of_goods_sold, closing_stock, net_profit
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expense_salaries, expense_packaging, expense_repairs, expense_other
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 buying_price = VALUES(buying_price),
                 old_stock = VALUES(old_stock),
@@ -259,13 +252,7 @@ app.post('/api/milk-records', async (req, res) => {
                 expense_salaries = VALUES(expense_salaries),
                 expense_packaging = VALUES(expense_packaging),
                 expense_repairs = VALUES(expense_repairs),
-                expense_other = VALUES(expense_other),
-                total_liters_sold = VALUES(total_liters_sold),
-                total_sales = VALUES(total_sales),
-                total_expenses = VALUES(total_expenses),
-                total_cost_of_goods_sold = VALUES(total_cost_of_goods_sold),
-                closing_stock = VALUES(closing_stock),
-                net_profit = VALUES(net_profit)
+                expense_other = VALUES(expense_other)
         `;
 
         const parseNum = (val) => (val === '' || val === undefined || val === null) ? 0 : Number(val);
@@ -280,10 +267,10 @@ app.post('/api/milk-records', async (req, res) => {
 
         if (existingRows.length === 0 && (old_stock === '' || old_stock === undefined || old_stock === null || Number(old_stock) === 0)) {
             const [previousRows] = await pool.query(
-                `SELECT COALESCE(closing_stock, 0) AS closing_stock FROM daily_milk_records WHERE branch_name = ? AND record_date < ? ORDER BY record_date DESC LIMIT 1`,
+                `SELECT * FROM daily_milk_records WHERE branch_name = ? AND record_date < ? ORDER BY record_date DESC LIMIT 1`,
                 [branch_name, record_date]
             );
-            oldStockNum = previousRows.length > 0 ? Number(previousRows[0].closing_stock || 0) : 0;
+            oldStockNum = previousRows.length > 0 ? calculateRecordTotals(previousRows[0]).closing_stock : 0;
         }
 
         // Calculate total stock available before sales
@@ -316,12 +303,34 @@ app.post('/api/milk-records', async (req, res) => {
             liters1500, liters1600, liters1700, liters1750, liters1800, liters1850,
             liters1900, liters1950, liters2000, liters2200,
             parseNum(expense_fuel), parseNum(expense_transport), parseNum(expense_electricity),
-            parseNum(expense_salaries), parseNum(expense_packaging), parseNum(expense_repairs), parseNum(expense_other),
-            totalLitersSold, totalSales, totalExpenses, totalCostOfGoodsSold, currentStock,
-            totalSales - totalCostOfGoodsSold - totalExpenses
+            parseNum(expense_salaries), parseNum(expense_packaging), parseNum(expense_repairs), parseNum(expense_other)
         ];
 
         const [result] = await pool.query(query, values);
+        const [recordColumns] = await pool.query('SHOW COLUMNS FROM daily_milk_records');
+        const generatedColumns = new Set(
+            recordColumns
+                .filter(column => String(column.Extra || '').toLowerCase().includes('generated'))
+                .map(column => column.Field)
+        );
+        const derivedValues = {
+            total_liters_sold: totalLitersSold,
+            total_sales: totalSales,
+            total_expenses: totalExpenses,
+            total_cost_of_goods_sold: totalCostOfGoodsSold,
+            closing_stock: currentStock,
+            net_profit: totalSales - totalCostOfGoodsSold - totalExpenses
+        };
+        const storedDerivedValues = Object.entries(derivedValues)
+            .filter(([column]) => !generatedColumns.has(column));
+
+        if (storedDerivedValues.length > 0) {
+            await pool.query(
+                `UPDATE daily_milk_records SET ${storedDerivedValues.map(([column]) => `${column} = ?`).join(', ')} WHERE record_date = ? AND branch_name = ?`,
+                [...storedDerivedValues.map(([, value]) => value), record_date, branch_name]
+            );
+        }
+
         res.status(201).json({ 
             message: "Daily record saved successfully!", 
             recordId: result.insertId,
@@ -336,24 +345,7 @@ app.post('/api/milk-records', async (req, res) => {
 app.get('/api/dashboard', async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        const [rows] = await pool.query(`
-            SELECT 
-                b.branch_name,
-                COALESCE(d.total_liters_sold, 0)  AS total_liters,
-                COALESCE(d.total_sales, 0)         AS total_revenue,
-                COALESCE(d.total_expenses, 0)      AS total_expenses,
-                COALESCE(d.net_profit, 0)          AS total_net_profit,
-                COALESCE(d.closing_stock, 0)       AS current_stock
-            FROM (
-                SELECT 'Bakuli'  AS branch_name UNION ALL
-                SELECT 'Owiino'  AS branch_name UNION ALL
-                SELECT 'Kawempe' AS branch_name
-            ) b
-            LEFT JOIN daily_milk_records d
-                ON d.branch_name = b.branch_name AND d.record_date = ?
-            ORDER BY b.branch_name
-        `, [date]);
-        res.json(rows);
+        res.json(await getDashboardRows(date));
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -362,26 +354,7 @@ app.get('/api/dashboard', async (req, res) => {
 app.get('/api/dashboard/:date', async (req, res) => {
     try {
         const { date } = req.params;
-        // Return one row per known branch for the given date (0s if no record exists that day)
-        const [rows] = await pool.query(`
-            SELECT 
-                b.branch_name,
-                COALESCE(d.total_liters_sold, 0)  AS total_liters,
-                COALESCE(d.total_sales, 0)         AS total_revenue,
-                COALESCE(d.total_expenses, 0)      AS total_expenses,
-                COALESCE(d.net_profit, 0)          AS total_net_profit,
-                COALESCE(d.closing_stock, 0)       AS current_stock,
-                COALESCE(d.total_cost_of_goods_sold, 0) AS total_buying_cost
-            FROM (
-                SELECT 'Bakuli'  AS branch_name UNION ALL
-                SELECT 'Owiino'  AS branch_name UNION ALL
-                SELECT 'Kawempe' AS branch_name
-            ) b
-            LEFT JOIN daily_milk_records d
-                ON d.branch_name = b.branch_name AND d.record_date = ?
-            ORDER BY b.branch_name
-        `, [date]);
-        res.json(rows);
+        res.json(await getDashboardRows(date));
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -395,7 +368,7 @@ app.get('/api/milk-records/:date/:branch', async (req, res) => {
             `SELECT * FROM daily_milk_records WHERE record_date = ? AND branch_name = ? LIMIT 1`,
             [date, branch]
         );
-        res.json(rows.length > 0 ? rows[0] : null);
+        res.json(rows.length > 0 ? { ...rows[0], ...calculateRecordTotals(rows[0]) } : null);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
