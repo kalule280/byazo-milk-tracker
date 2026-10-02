@@ -39,6 +39,42 @@ const ensureMilkRecordColumns = async () => {
 // --- Initialize Branch Tables on Startup ---
 const initBranchTables = async () => {
     try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS daily_milk_records (
+                record_id INT AUTO_INCREMENT PRIMARY KEY,
+                record_date DATE NOT NULL,
+                branch_name VARCHAR(100) NOT NULL,
+                buying_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+                old_stock DECIMAL(12,2) NOT NULL DEFAULT 0,
+                new_stock DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1500 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1600 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1700 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1750 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1800 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1850 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1900 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_1950 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_2000 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                liters_sold_2200 DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_fuel DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_transport DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_electricity DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_salaries DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_packaging DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_repairs DECIMAL(12,2) NOT NULL DEFAULT 0,
+                expense_other DECIMAL(12,2) NOT NULL DEFAULT 0,
+                total_liters_sold DECIMAL(12,2) NOT NULL DEFAULT 0,
+                total_sales DECIMAL(14,2) NOT NULL DEFAULT 0,
+                total_expenses DECIMAL(12,2) NOT NULL DEFAULT 0,
+                total_cost_of_goods_sold DECIMAL(14,2) NOT NULL DEFAULT 0,
+                closing_stock DECIMAL(12,2) NOT NULL DEFAULT 0,
+                net_profit DECIMAL(14,2) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_daily_milk_record_date_branch (record_date, branch_name)
+            )
+        `);
         // Initialize users table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS users (
@@ -147,8 +183,9 @@ app.post('/api/milk-records', async (req, res) => {
                 liters_sold_1500, liters_sold_1600, liters_sold_1700, liters_sold_1750, liters_sold_1800, liters_sold_1850,
                 liters_sold_1900, liters_sold_1950, liters_sold_2000, liters_sold_2200,
                 expense_fuel, expense_transport, expense_electricity, 
-                expense_salaries, expense_packaging, expense_repairs, expense_other
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expense_salaries, expense_packaging, expense_repairs, expense_other,
+                total_liters_sold, total_sales, total_expenses, total_cost_of_goods_sold, closing_stock, net_profit
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 buying_price = VALUES(buying_price),
                 old_stock = VALUES(old_stock),
@@ -169,7 +206,13 @@ app.post('/api/milk-records', async (req, res) => {
                 expense_salaries = VALUES(expense_salaries),
                 expense_packaging = VALUES(expense_packaging),
                 expense_repairs = VALUES(expense_repairs),
-                expense_other = VALUES(expense_other)
+                expense_other = VALUES(expense_other),
+                total_liters_sold = VALUES(total_liters_sold),
+                total_sales = VALUES(total_sales),
+                total_expenses = VALUES(total_expenses),
+                total_cost_of_goods_sold = VALUES(total_cost_of_goods_sold),
+                closing_stock = VALUES(closing_stock),
+                net_profit = VALUES(net_profit)
         `;
 
         const parseNum = (val) => (val === '' || val === undefined || val === null) ? 0 : Number(val);
@@ -207,6 +250,10 @@ app.post('/api/milk-records', async (req, res) => {
         const liters2200 = parseNum(liters_sold_2200);
 
         const totalLitersSold = liters1500 + liters1600 + liters1700 + liters1750 + liters1800 + liters1850 + liters1900 + liters1950 + liters2000 + liters2200;
+        const totalSales = liters1500 * 1500 + liters1600 * 1600 + liters1700 * 1700 + liters1750 * 1750 + liters1800 * 1800 + liters1850 * 1850 + liters1900 * 1900 + liters1950 * 1950 + liters2000 * 2000 + liters2200 * 2200;
+        const totalExpenses = [expense_fuel, expense_transport, expense_electricity, expense_salaries, expense_packaging, expense_repairs, expense_other]
+            .reduce((total, expense) => total + parseNum(expense), 0);
+        const totalCostOfGoodsSold = parseNum(buying_price) * totalLitersSold;
 
         // Calculate the remaining current/closing stock
         const currentStock = totalAvailableStock - totalLitersSold;
@@ -216,7 +263,9 @@ app.post('/api/milk-records', async (req, res) => {
             liters1500, liters1600, liters1700, liters1750, liters1800, liters1850,
             liters1900, liters1950, liters2000, liters2200,
             parseNum(expense_fuel), parseNum(expense_transport), parseNum(expense_electricity),
-            parseNum(expense_salaries), parseNum(expense_packaging), parseNum(expense_repairs), parseNum(expense_other)
+            parseNum(expense_salaries), parseNum(expense_packaging), parseNum(expense_repairs), parseNum(expense_other),
+            totalLitersSold, totalSales, totalExpenses, totalCostOfGoodsSold, currentStock,
+            totalSales - totalCostOfGoodsSold - totalExpenses
         ];
 
         const [result] = await pool.query(query, values);
